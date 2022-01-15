@@ -1,8 +1,12 @@
 use crate::errors::RustusResult;
 use crate::info_storages::FileInfo;
-use actix_files::NamedFile;
+
+use actix_web::web::Bytes;
+
 use async_trait::async_trait;
 use std::fmt::Display;
+
+use tokio::sync::mpsc::UnboundedSender;
 
 #[async_trait]
 pub trait Storage: Display {
@@ -25,7 +29,11 @@ pub trait Storage: Display {
     ///
     /// # Params
     /// `file_info` - info about current file.
-    async fn get_contents(&self, file_info: &FileInfo) -> RustusResult<NamedFile>;
+    async fn get_contents(
+        &self,
+        file_info: FileInfo,
+        sender: UnboundedSender<RustusResult<Bytes>>,
+    ) -> RustusResult<()>;
 
     /// Add bytes to the file.
     ///

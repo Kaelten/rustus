@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use actix_files::NamedFile;
+use actix_web::web::Bytes;
 use async_std::fs::{remove_file, DirBuilder, OpenOptions};
 use async_std::prelude::*;
 use async_trait::async_trait;
@@ -11,6 +11,9 @@ use crate::info_storages::FileInfo;
 use crate::storages::Storage;
 use crate::RustusConf;
 use derive_more::Display;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, BufReader};
+use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Display)]
 #[display(fmt = "file_storage")]
@@ -62,16 +65,30 @@ impl Storage for FileStorage {
         Ok(())
     }
 
-    async fn get_contents(&self, file_info: &FileInfo) -> RustusResult<NamedFile> {
+    async fn get_contents(
+        &self,
+        file_info: FileInfo,
+        channel: UnboundedSender<RustusResult<Bytes>>,
+    ) -> RustusResult<()> {
         if file_info.path.is_none() {
             return Err(RustusError::FileNotFound);
         }
-        NamedFile::open_async(file_info.path.clone().unwrap().as_str())
-            .await
-            .map_err(|err| {
-                error!("{:?}", err);
-                RustusError::FileNotFound
-            })
+        let file = File::open(file_info.path.unwrap()).await?;
+        let mut reader = BufReader::new(file);
+        let mut buffer = [0; 1024 * 4];
+        loop {
+            let read = reader.read(&mut buffer).await?;
+            if read == 0 {
+                break;
+            }
+            channel
+                .send(Ok(buffer.into_iter().take(read).collect::<Bytes>()))
+                .map_err(|err| {
+                    error!("{}", err);
+                    RustusError::UnableToReadInfo
+                })?;
+        }
+        Ok(())
     }
 
     async fn add_bytes(&self, info: &FileInfo, bytes: &[u8]) -> RustusResult<()> {

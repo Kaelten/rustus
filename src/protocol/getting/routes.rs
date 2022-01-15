@@ -1,4 +1,7 @@
-use actix_web::{web, HttpRequest, Responder};
+use actix_web::{web, HttpRequest, HttpResponse, Responder};
+
+use tokio::sync::mpsc::unbounded_channel;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::errors::RustusError;
 use crate::State;
@@ -13,7 +16,14 @@ pub async fn get_file(request: HttpRequest, state: web::Data<State>) -> impl Res
         if file_info.storage != state.data_storage.to_string() {
             return Err(RustusError::FileNotFound);
         }
-        state.data_storage.get_contents(&file_info).await
+        let (tx, rx_body) = unbounded_channel();
+        tokio::spawn(async move {
+            state
+                .data_storage
+                .get_contents(file_info.clone(), tx.clone())
+                .await
+        });
+        Ok(HttpResponse::Ok().streaming(UnboundedReceiverStream::new(rx_body)))
     } else {
         Err(RustusError::FileNotFound)
     }
